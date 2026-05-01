@@ -60,62 +60,89 @@
         </div>
     </div>
 
-    <script>
-        // Initialize Supabase configured for your project
-        // IMPORTANT: These are public keys, perfectly safe to use here.
-        const SUPABASE_URL = 'https://sizrlyuzmhfeesjjyzuj.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpenJseXV6bWhmZWVzamp5enVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5MjAxNTAsImV4cCI6MjA3ODQ5NjE1MH0.RKuhHLL7ZYT6Y97ulYMaEaTiyU-nnR2G3NKzMefX_J0';
-        
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+<script>
+    const SUPABASE_URL = 'https://sizrlyuzmhfeesjjyzuj.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpenJseXV6bWhmZWVzamp5enVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5MjAxNTAsImV4cCI6MjA3ODQ5NjE1MH0.RKuhHLL7ZYT6Y97ulYMaEaTiyU-nnR2G3NKzMefX_J0';
 
-        const form = document.getElementById('reset-form');
-        const submitBtn = document.getElementById('submit-btn');
-        const messageEl = document.getElementById('message');
-        const successState = document.getElementById('success-state');
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        function showMessage(text, isError) {
-            messageEl.textContent = text;
-            messageEl.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
-            messageEl.classList.add(isError ? 'bg-red-100' : 'bg-green-100', isError ? 'text-red-700' : 'text-green-700');
+    const form = document.getElementById('reset-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const messageEl = document.getElementById('message');
+    const successState = document.getElementById('success-state');
+
+    function showMessage(text, isError) {
+        messageEl.textContent = text;
+        messageEl.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
+        messageEl.classList.add(
+            isError ? 'bg-red-100' : 'bg-green-100',
+            isError ? 'text-red-700' : 'text-green-700'
+        );
+    }
+
+    async function initSession() {
+        // Hide form until we confirm a valid recovery session
+        form.classList.add('hidden');
+        showMessage('Verifying your reset link...', false);
+
+        // PKCE flow: Supabase v2 sends ?code= in the URL
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+
+        if (code) {
+            const { error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+                showMessage('This reset link has expired or already been used. Please request a new one.', true);
+                return;
+            }
         }
 
-        // When Supabase redirects here from the email, it adds an access_token to the URL hash
-        // The Supabase JS library automatically parses this and establishes a session!
-        
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const newPassword = document.getElementById('password').value;
-
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Updating...';
-            submitBtn.classList.add('opacity-70');
-
-            try {
-                // Update the user's password securely
-                const { error } = await supabase.auth.updateUser({
-                    password: newPassword
-                });
-
-                if (error) throw error;
-
-                // Success
-                form.classList.add('hidden');
-                successState.classList.remove('hidden');
+        // Listen for the PASSWORD_RECOVERY event (covers both PKCE and implicit flows)
+        supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
                 messageEl.classList.add('hidden');
-
-            } catch (error) {
-                console.error(error);
-                showMessage(error.message || 'Failed to update password. The link may have expired.', true);
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Update Password';
-                submitBtn.classList.remove('opacity-70');
+                form.classList.remove('hidden');
             }
         });
 
-        // Ensure we actually have an active recovery session from the URL hash
-        window.addEventListener('hashchange', () => {
-            // Optional: You could check if type=recovery is in the hash
-        });
-    </script>
+        // Fallback: check if session already exists (implicit flow sets it immediately)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            messageEl.classList.add('hidden');
+            form.classList.remove('hidden');
+        } else if (!code) {
+            // No code in URL and no session = invalid/expired link
+            showMessage('This reset link has expired or already been used. Please request a new one.', true);
+        }
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPassword = document.getElementById('password').value;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        submitBtn.classList.add('opacity-70');
+
+        try {
+            const { error } = await supabase.auth.updateUser({ password: newPassword });
+            if (error) throw error;
+
+            form.classList.add('hidden');
+            successState.classList.remove('hidden');
+            messageEl.classList.add('hidden');
+
+        } catch (error) {
+            console.error(error);
+            showMessage(error.message || 'Failed to update password. The link may have expired.', true);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Update Password';
+            submitBtn.classList.remove('opacity-70');
+        }
+    });
+
+    initSession();
+</script>
+
 </body>
 </html>
