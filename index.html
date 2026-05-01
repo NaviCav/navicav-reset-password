@@ -81,39 +81,42 @@
     }
 
     async function initSession() {
-        // Hide form until we confirm a valid recovery session
         form.classList.add('hidden');
         showMessage('Verifying your reset link...', false);
 
-        // PKCE flow: Supabase v2 sends ?code= in the URL
+        // Set up listener FIRST before any async work so we never miss an event.
+        // Supabase fires INITIAL_SESSION immediately on subscribe with the current state,
+        // then PASSWORD_RECOVERY or SIGNED_IN once the token is processed.
+        supabase.auth.onAuthStateChange((event, session) => {
+            if (session && (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+                messageEl.classList.add('hidden');
+                form.classList.remove('hidden');
+            }
+        });
+
+        // PKCE flow: Supabase v2 sends ?code= in URL
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
 
         if (code) {
             const { error } = await supabase.auth.exchangeCodeForSession(code);
             if (error) {
-                showMessage('This reset link has expired or already been used. Please request a new one.', true);
-                return;
+                console.warn('Code exchange failed:', error.message);
+                // Don't hard-fail here — fall through to getSession() check below
             }
         }
 
-        // Listen for the PASSWORD_RECOVERY event (covers both PKCE and implicit flows)
-        supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
-                messageEl.classList.add('hidden');
-                form.classList.remove('hidden');
-            }
-        });
-
-        // Fallback: check if session already exists (implicit flow sets it immediately)
+        // Check session directly (covers PKCE after exchange + implicit hash flow)
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
             messageEl.classList.add('hidden');
             form.classList.remove('hidden');
-        } else if (!code) {
-            // No code in URL and no session = invalid/expired link
-            showMessage('This reset link has expired or already been used. Please request a new one.', true);
+            return;
         }
+
+        // Still no session — link is expired, already used, or invalid
+        if (!form.classList.contains('hidden')) return; // onAuthStateChange already showed form
+        showMessage('This reset link has expired or already been used. Please request a new one.', true);
     }
 
     form.addEventListener('submit', async (e) => {
